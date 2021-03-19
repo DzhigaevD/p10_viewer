@@ -1,0 +1,479 @@
+% --- e4mview_script: Script to view EIGER 4M images from scans
+% ---
+
+% =========================================================================
+% --- Define Switches
+% --- Define ROI variables
+% =========================================================================
+SaveEachFrame    = 0                                                       ;
+SaveEachFrameROI = 0                                                       ;
+SaveROIStack     = 0                                                       ;
+correctbs        = 0                                                       ;
+roi1switch       = 0                                                       ;
+roi1             = [1,2000, 150,1000]                                      ;
+
+badpixelswitch   = 0                                                       ;
+badpixelrow      = [1302, 1308, 1308, 1433]                                ;
+badpixelcol      = [1380, 1665, 1666, 1723]                                ;
+
+% =========================================================================
+% --- Define 'maindir' variable
+% =========================================================================
+% 'commissioning'
+beamtimeId    = '11003694'                                                 ;
+maindirswitch = 2                                                          ;
+if maindirswitch == 1
+    maindir = '/gpfs/current/raw/'                                         ; % E.g. on Beamline Linux PCs
+elseif maindirswitch == 2
+    maindir = 'T:\current\raw\'                                            ; % E.g. on Beamline Windows PCs
+elseif maindirswitch == 3
+    maindir = ['T:\2017\data\' beamtimeId '\raw\']                         ; % E.g. on Office Windows PCs
+%     maindir = ['D:\testdata\']                                             ; % E.g. on Office Windows PCs
+elseif maindirswitch == 4
+    maindir = ['T:\commissioning\raw\'];
+else
+end
+
+% =========================================================================
+% --- Define 'scan' variables
+% =========================================================================
+detector   = 'e4m'                                                         ;
+filestart  = 'sample2371w1_'                                                       ;
+scannumber = 38    ;
+scantype   = 'series'                                                       ;
+if strcmpi(scantype,'series') == 1
+    nframes = 120                                                          ;
+else
+    nframes = []                                                           ;
+end
+
+mot1       = 'samz'                                                        ;
+low1       = 0.0432                                                        ; %[um]
+high1      = 0.7432                                                       ; %[um]
+nint1      = 70                                                            ;
+
+mot2       = 'samz'                                                        ;
+low2       = -0.100                                                        ; %[um]
+high2      =  0.100                                                        ; %[um]
+nint2      = 10                                                            ;
+
+ndata      = 1                                                             ;
+ndark      = 0                                                             ;
+exp_time   = 2.0                                                          ;
+delay_time = 0.0                                                           ;
+
+% =========================================================================
+% --- Assemble 'master' file name
+% =========================================================================
+if strcmpi(filestart(end),'_') ~= 1
+    filestart = [filestart '_']                                            ;
+end
+masterfile = [maindir filestart sprintf('%05i',scannumber) filesep      ...
+              detector filesep filestart sprintf('%05i',scannumber)     ...
+              '_master.h5']                                                ;
+
+% =========================================================================
+% --- Assemble output directory names
+% =========================================================================
+outputdir      = [maindir 'processed\' filestart sprintf('%05i',scannumber) '\']      ;
+outputsum      = [outputdir filestart sprintf('%05i',scannumber) '_sum.mat']          ;
+outputroi      = [outputdir filestart sprintf('%05i',scannumber) '_roi.mat']          ;
+outputroistack = [outputdir filestart sprintf('%05i',scannumber) '_roistack.mat']     ;
+mkdir(outputdir)                                                                      ;
+
+outputstxmdir  = [maindir 'processed\' filestart sprintf('%05i',scannumber) '_stxm\'] ;
+outputstxm     = [outputstxmdir filestart sprintf('%05i',scannumber) '_stxm.mat']     ;
+mkdir(outputstxmdir)                                                                  ;
+
+% =========================================================================
+% --- Define behavior according to 'scantype'
+% =========================================================================
+figurestartnum = 127                                                       ;
+switch scantype
+
+    case {'ascan', 'dscan', 'a2scan', 'd2scan'}
+        step = (high1-low1)/nint1                                          ;
+        x    = low1:step:high1                                             ;
+        for n = 1 : nint1 + 1
+            img = openfile(masterfile, (n-1)*ndata + 1)                    ;
+            if n == 1
+                sumimg = zeros(size(img.imm,1),size(img.imm,2))            ;
+                int    = zeros(nint1+1,1)                                  ;
+                try
+                    close(figurestartnum)                                  ;
+                catch
+                end
+            end
+            
+            if correctbs == 1
+               cimg = correct_beamstop(img.imm)                            ; % correct semi-transparent beamstop
+            else
+                cimg = img.imm                                             ;
+            end
+            
+            sumimg = sumimg + cimg                                         ;
+            int(n) = sum(cimg(:))                                          ;
+            
+            figure(figurestartnum)                                         ;
+            set(gcf,'Position',[200 50 500 1000])                          ;
+            subplot(3,1,1)
+            imagesc(log10(cimg+1))                                         ;
+            axis image                                                     ;
+            colorbar                                                       ;
+            caxis([0 1])                                                   ;
+            title('Full frame information')
+            subplot(3,1,2)
+            imagesc(log10(sumimg+1))                                       ;
+            axis image                                                     ;
+            colorbar                                                       ;
+            subplot(3,1,3)
+            hl1 = plot(x,int,'ro-')                                        ;
+            if n == 1 || n == nint1 + 1
+                pause(0.1)                                                 ;
+                if strcmpi(scantype,'ascan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                    xlabels{1} = [mot1 ' [abs. motor position]']           ;
+                elseif strcmpi(scantype,'dscan') == 1 || strcmpi(scantype,'d2scan') == 1  
+                    xlabels{1} = [mot1 ' [rel. motor position]']           ;
+                end
+                xlabels{2} = sprintf('Scan point no. [0 ... %i]',nint1)    ;
+                ylabels{1} = 'intensity'                                   ;
+                
+                ax(1) = gca                                                ;
+                set(ax(1),'XColor','k','YColor','k')                       ;
+                
+                ax(2) = axes('Position',get(ax(1),'Position')           ...
+                            ,'XAxisLocation','top'                      ...
+                            ,'YAxisLocation','right'                    ...
+                            ,'Color','none','XColor','r','YColor','k')     ;
+                set(ax,'box','off')                                        ;
+                
+                hl2 = line(0:nint1,int,'Color','r','Parent',ax(2))         ;
+                
+                set(get(ax(1),'xlabel'),'string',xlabels{1})               ;
+                set(get(ax(2),'xlabel'),'string',xlabels{2})               ;
+                set(get(ax(1),'ylabel'),'string',ylabels{1})               ;
+                set(get(ax(2),'ylabel'),'string',ylabels{1})               ;
+                set(gcf, 'CurrentAxes', ax(1))                             ;
+                figure(gcf)                                                ;
+            end
+            
+            if roi1switch == 1
+                if n == 1
+                    sumimgroi1 = zeros(roi1(2)-roi1(1)+1,roi1(4)-roi1(3)+1);
+                    introi1    = zeros(nint1+1,1)                          ;
+                    try
+                        close(figurestartnum+1)                            ;
+                    catch
+                    end
+                end
+                
+                cimgroi = cimg(roi1(1):roi1(2),roi1(3):roi1(4))            ;
+                                
+                sumimgroi1 = sumimgroi1 + cimgroi                          ;
+                introi1(n) = sum(sum(cimgroi))                             ;
+                figure(figurestartnum + 1)                                 ;
+                set(gcf,'Position',[750 50 500 1000])                      ;
+                subplot(3,1,1)
+                imagesc(log10(cimgroi+1))                                  ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                caxis([0 1])                                               ;
+                title('ROI #1 information')
+                subplot(3,1,2)
+                imagesc(log10(sumimgroi1+1))                               ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                subplot(3,1,3)
+                plot(x,introi1,'ro-')                                      ;
+                if n == 1 || n == nint1+1
+                    pause(0.1)                                             ;
+                    if strcmpi(scantype,'ascan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                        xlabels{1} = [mot1 ' [abs. motor position]']       ;
+                    elseif strcmpi(scantype,'dscan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                        xlabels{1} = [mot1 ' [rel. motor position]']       ;
+                    end
+                    xlabels{2} = sprintf('Scan point no. [0 ... %i]',nint1);
+                    ylabels{1} = 'ROI #1 intensity'                        ;
+                    
+                    ax(1) = gca                                            ;
+                    set(ax(1),'XColor','k','YColor','k')                   ;
+                    
+                    ax(2) = axes('Position',get(ax(1),'Position')       ...
+                        ,'XAxisLocation','top'                          ...
+                        ,'YAxisLocation','right'                        ...
+                        ,'Color','none','XColor','r','YColor','k')         ;
+                    set(ax,'box','off')                                    ;
+                    
+                    hl2 = line(0:nint1,introi1,'Color','r','Parent',ax(2)) ;
+                    
+                    set(get(ax(1),'xlabel'),'string',xlabels{1})           ;
+                    set(get(ax(2),'xlabel'),'string',xlabels{2})           ;
+                    set(get(ax(1),'ylabel'),'string',ylabels{1})           ;
+                    set(get(ax(2),'ylabel'),'string',ylabels{1})           ;
+                    set(gcf, 'CurrentAxes', ax(1))                         ;
+                    figure(gcf)                                            ;
+                end
+            end
+            pause(0.1)                                                     ;
+        end
+        
+    case {'amesh', 'dmesh'}
+        step1 = (high1-low1)/nint1                                         ;
+        x     = low1:step1:high1                                           ;
+        step2 = (high2-low2)/nint2                                         ;
+        y     = low2:step2:high2                                           ;
+        for n = 1 : (nint1 + 1) * (nint2 + 1)
+            img = openfile(masterfile, (n-1)*ndata + 1)                    ;
+            if n == 1
+                sumimg = zeros(size(img.imm,1),size(img.imm,2))            ;
+                int    = zeros((nint1 + 1) * (nint2 + 1),1)                ;
+                try
+                    close(figurestartnum)                                  ;
+                catch
+                end
+            end
+            
+            if correctbs == 1
+                cimg = correct_beamstop(img.imm)                           ;
+            else
+                cimg = img.imm                                             ;
+            end
+            
+            if badpixelswitch == 1
+                for k = 1 : numel(badpixelrow)
+                    cimg(badpixelrow(k), badpixelcol(k)) = cimg(badpixelrow(k)-1, badpixelcol(k)) ; % replace bad pixel by upper pixel
+                end
+            end
+            
+            if SaveEachFrame == 1
+                fprintf('-')                                               ;
+                if mod(n,50)==0
+                     fprintf('\n')                                         ;
+                end
+                s = sprintf('%.5d',n)                                      ;
+                save(strcat(outputdir,filestart,s,'.mat'), 'cimg')         ;
+            end
+                
+            sumimg = sumimg + cimg                                         ;
+            int(n) = sum(cimg(:))                                          ;
+
+            if mod(n , nint1+1) == 0
+                figure(figurestartnum)                                     ;
+                subplot(3,1,1)
+                imagesc(log10(cimg+1))                                     ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                subplot(3,1,2)
+                imagesc(log10(sumimg+1))                                   ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                subplot(3,1,3)
+                intplot = reshape(int,[nint1 + 1,nint2 + 1]).'             ;
+                imagesc(x, y, intplot)                                     ;
+                axis image
+                xlabel(mot1,'FontSize',12)                                 ;
+                ylabel(mot2,'FontSize',12)                                 ;
+                figure(figurestartnum)                                     ;
+                colorbar                                                   ;
+                drawnow                                                    ;
+            end
+            
+            if roi1switch == 1
+                if n == 1
+                    sumimgroi1 = zeros(roi1(2)-roi1(1)+1,roi1(4)-roi1(3)+1);
+                    introi1    = zeros((nint1 + 1) * (nint2 + 1),1)        ;
+                    try
+                        close(figurestartnum+1)                            ;
+                    catch
+                    end
+                end
+                
+                cimgroi = cimg(roi1(1):roi1(2),roi1(3):roi1(4))            ;
+                
+                if n == 1 && SaveROIStack == 1
+                    imgroistack = zeros(size(cimgroi,1), size(cimgroi,2), (nint1 + 1) * (nint2 + 1), 'single') ;
+                end
+                if SaveROIStack == 1
+                    imgroistack(:,:,n) = cimgroi                           ;
+                end
+                
+                if SaveEachFrameROI == 1
+                    fprintf('-')                                           ;
+                    if mod(n,50)==0
+                        fprintf('\n')                                      ;
+                    end
+                    s = sprintf('%.5d',n)                                  ;
+                    save(strcat(outputdir,filestart,s,'.mat'), 'cimgroi')  ;
+                end
+                
+                sumimgroi1 = sumimgroi1 + cimgroi                          ;
+                introi1(n) = sum(sum(cimgroi))                             ;
+
+                if mod(n , nint1+1) == 0
+                    figure(figurestartnum + 1)                             ;
+                    subplot(3,1,1)
+                    imagesc(log10(cimgroi+1))                              ;
+                    axis image                                             ;
+                    colorbar                                               ;
+                    subplot(3,1,2)
+                    imagesc(log10(sumimgroi1+1))                           ;
+                    axis image                                             ;
+                    colorbar                                               ;
+                    subplot(3,1,3)
+                    introi1plot = reshape(introi1,[nint1 + 1,nint2 + 1]).' ;
+                    imagesc(x, y, introi1plot)                             ;
+                    axis image
+                    xlabel(mot1,'FontSize',12)                             ;
+                    ylabel(mot2,'FontSize',12)                             ;
+                    figure(figurestartnum + 1)                             ;
+                    colorbar                                               ;
+                    drawnow                                                ;
+                end
+           end
+        end
+        pause(0.1)                                                         ;
+        if roi1switch == 1
+            save(outputstxm, 'intplot', 'introi1plot')                     ;
+        else
+            save(outputstxm, 'intplot')                                    ;
+        end
+        save(outputsum , 'sumimg', 'int')                                  ;
+        if roi1switch == 1
+            save(outputroi, 'sumimgroi1', 'introi1')                       ;
+        end
+        if SaveROIStack == 1
+            save(outputroistack, 'imgroistack')                            ;
+        end
+        fprintf('\n')                                                      ;
+        
+    case {'series'}
+        step = 1                                                           ;
+        x    = 1:step:nframes                                              ;
+        for n = 1 : nframes
+            img = openfile(masterfile, (n-1)*ndata + 1)                    ;
+            if n == 1
+                sumimg = zeros(size(img.imm,1),size(img.imm,2))            ;
+                int    = zeros(nframes,1)                                  ;
+                try
+                    close(figurestartnum)                                  ;
+                catch
+                end
+            end
+            
+            if correctbs == 1
+                cimg = correct_beamstop(img.imm)                           ; % correct semi-transparent beamstop
+            else
+                cimg = img.imm                                             ;
+            end
+            
+            sumimg = sumimg + cimg                                         ;
+            int(n) = sum(cimg(:))                                          ;
+            
+            figure(figurestartnum)                                         ;
+            set(gcf,'Position',[200 50 500 1000])                          ;
+            subplot(3,1,1)
+            imagesc(log10(cimg+1))                                         ;
+            axis image                                                     ;
+            colorbar                                                       ;
+            caxis([0 1])                                                   ;
+            title('Full frame information')
+            subplot(3,1,2)
+            imagesc(log10(sumimg+1))                                       ;
+            axis image                                                     ;
+            colorbar                                                       ;
+            subplot(3,1,3)
+            hl1 = plot(x,int,'ro-')                                        ;
+            if n == 1 || n == nframes
+                pause(0.1)                                                 ;
+                if strcmpi(scantype,'ascan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                    xlabels{1} = [mot1 ' [abs. motor position]']           ;
+                elseif strcmpi(scantype,'dscan') == 1 || strcmpi(scantype,'d2scan') == 1  
+                    xlabels{1} = [mot1 ' [rel. motor position]']           ;
+                end
+                xlabels{2} = sprintf('Scan point no. [0 ... %i]',nframes)  ;
+                ylabels{1} = 'intensity'                                   ;
+                
+                ax(1) = gca                                                ;
+                set(ax(1),'XColor','k','YColor','k')                       ;
+                
+                ax(2) = axes('Position',get(ax(1),'Position')           ...
+                            ,'XAxisLocation','top'                      ...
+                            ,'YAxisLocation','right'                    ...
+                            ,'Color','none','XColor','r','YColor','k')     ;
+                set(ax,'box','off')                                        ;
+                
+                hl2 = line(1:nframes,int,'Color','r','Parent',ax(2))       ;
+                
+                set(get(ax(1),'xlabel'),'string',xlabels{1})               ;
+                set(get(ax(2),'xlabel'),'string',xlabels{2})               ;
+                set(get(ax(1),'ylabel'),'string',ylabels{1})               ;
+                set(get(ax(2),'ylabel'),'string',ylabels{1})               ;
+                set(gcf, 'CurrentAxes', ax(1))                             ;
+                figure(gcf)                                                ;
+            end
+            
+            if roi1switch == 1
+                if n == 1
+                    sumimgroi1 = zeros(roi1(2)-roi1(1)+1,roi1(4)-roi1(3)+1);
+                    introi1    = zeros(nframes,1)                          ;
+                    try
+                        close(figurestartnum+1)                            ;
+                    catch
+                    end
+                end
+                
+                cimgroi = cimg(roi1(1):roi1(2),roi1(3):roi1(4))            ;
+                
+                sumimgroi1 = sumimgroi1 + cimgroi                          ;
+                introi1(n) = sum(sum(cimgroi))                             ;
+                figure(figurestartnum + 1)                                 ;
+                set(gcf,'Position',[750 50 500 1000])                      ;
+                subplot(3,1,1)
+                imagesc(log10(cimgroi+1))                                  ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                title('ROI #1 information')
+                subplot(3,1,2)
+                imagesc(log10(sumimgroi1+1))                               ;
+                axis image                                                 ;
+                colorbar                                                   ;
+                subplot(3,1,3)
+                plot(x,introi1,'ro-')                                      ;
+                if n == 1 || n == nframes
+                    pause(0.1)                                             ;
+                    if strcmpi(scantype,'ascan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                        xlabels{1} = [mot1 ' [abs. motor position]']       ;
+                    elseif strcmpi(scantype,'dscan') == 1 || strcmpi(scantype,'a2scan') == 1  
+                        xlabels{1} = [mot1 ' [rel. motor position]']       ;
+                    end
+                    xlabels{2} = sprintf('Scan point no. [0 ... %i]',nframes);
+                    ylabels{1} = 'ROI #1 intensity'                        ;
+                    
+                    ax(1) = gca                                            ;
+                    set(ax(1),'XColor','k','YColor','k')                   ;
+                    
+                    ax(2) = axes('Position',get(ax(1),'Position')       ...
+                        ,'XAxisLocation','top'                          ...
+                        ,'YAxisLocation','right'                        ...
+                        ,'Color','none','XColor','r','YColor','k')         ;
+                    set(ax,'box','off')                                    ;
+                    
+                    hl2 = line(1:nframes,introi1,'Color','r','Parent',ax(2)) ;
+                    
+                    set(get(ax(1),'xlabel'),'string',xlabels{1})           ;
+                    set(get(ax(2),'xlabel'),'string',xlabels{2})           ;
+                    set(get(ax(1),'ylabel'),'string',ylabels{1})           ;
+                    set(get(ax(2),'ylabel'),'string',ylabels{1})           ;
+                    set(gcf, 'CurrentAxes', ax(1))                         ;
+                    figure(gcf)                                            ;
+                end
+            end
+            pause(0.1)                                                     ;
+        end
+        
+    otherwise
+        disp('Unknown scantype')
+end
+
+% ---
+% EOF
