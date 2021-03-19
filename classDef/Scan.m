@@ -150,15 +150,15 @@ classdef Scan < handle
             mkdir(fullfile(obj.metaData.saveFolder,fileTemp));
             save(fullfile(obj.metaData.saveFolder,fileTemp,[fileTemp,'.mat']),'obj','-v7.3');
             
-            ttt = obj.data;
-            save(fullfile(obj.metaData.saveFolder,fileTemp,[fileTemp,'_diff.mat']),'ttt','-v7.3');            
+            data = obj.data;
+            save(fullfile(obj.metaData.saveFolder,fileTemp,[fileTemp,'_diff.mat']),'data','-v7.3');            
             disp('Done!');
             
             disp('Saving data to .bin ...');                        
             fid = fopen(fullfile(obj.metaData.saveFolder,fileTemp,[fileTemp,'.bin']),'wb');            
-            fwrite(fid,ttt,'double');
+            fwrite(fid,data,'double');
             fclose(fid);
-            clear ttt;
+            
             disp('Done!');
         end
     end
